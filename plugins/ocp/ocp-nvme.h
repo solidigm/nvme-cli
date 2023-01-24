@@ -20,6 +20,9 @@ PLUGIN(NAME("ocp", "OCP cloud SSD extensions", NVME_VERSION),
 			ocp_latency_monitor_log)
 		ENTRY("clear-fw-activate-history", "Clear firmware update history log",
 			clear_fw_update_history)
+		ENTRY("vs-fw-activate-history",
+			"Get firmware activation history log",
+			fw_activation_history_log)
 	)
 );
 

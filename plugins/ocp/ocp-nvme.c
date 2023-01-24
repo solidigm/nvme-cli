@@ -26,6 +26,7 @@
 
 #include "ocp-smart-extended-log.h"
 #include "ocp-clear-fw-update-history.h"
+#include "ocp-fw-activation-history.h"
 
 #define CREATE_CMD
 #include "ocp-nvme.h"
@@ -468,3 +469,10 @@ static int clear_fw_update_history(int argc, char **argv, struct command *cmd,
 {
 	return ocp_clear_fw_update_history(argc, argv, cmd, plugin);
 }
+
+static int fw_activation_history_log(int argc, char **argv, struct command *cmd,
+	struct plugin *plugin)
+{
+	return ocp_fw_activation_history_log(argc, argv, cmd, plugin);
+}
+
