@@ -18,6 +18,7 @@
 #include "plugins/ocp/ocp-smart-extended-log.h"
 #include "plugins/ocp/ocp-clear-fw-update-history.h"
 #include "plugins/ocp/ocp-fw-activation-history.h"
+#include "plugins/ocp/ocp-clear-pcie-correctable.h"
 
 static int get_additional_smart_log(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
@@ -55,4 +56,10 @@ static int fw_activation_history(int argc, char **argv, struct command *cmd,
 	struct plugin *plugin)
 {
 	return ocp_fw_activation_history_log(argc, argv, cmd, plugin);
+}
+
+static int clear_pcie_correctable_errors(int argc, char **argv, struct command *cmd,
+	struct plugin *plugin)
+{
+	return ocp_clear_pcie_correctable_errors(argc, argv, cmd, plugin);
 }

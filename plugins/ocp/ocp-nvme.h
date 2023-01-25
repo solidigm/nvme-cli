@@ -23,6 +23,9 @@ PLUGIN(NAME("ocp", "OCP cloud SSD extensions", NVME_VERSION),
 		ENTRY("vs-fw-activate-history",
 			"Get firmware activation history log",
 			fw_activation_history_log)
+		ENTRY("clear-pcie-correctable-errors",
+			"Clears the PCIe correctable error count",
+			clear_pcie_correctable_errors)
 	)
 );
 

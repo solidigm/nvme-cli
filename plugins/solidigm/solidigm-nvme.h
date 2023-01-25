@@ -30,6 +30,9 @@ PLUGIN(NAME("solidigm", "Solidigm vendor specific extensions", SOLIDIGM_PLUGIN_V
 		ENTRY("vs-fw-activate-history",
 			"Get firmware activation history log (redirects to ocp plug-in)",
 			fw_activation_history)
+		ENTRY("clear-pcie-correctable-errors",
+			"Clears the PCIe correctable error count (redirects to ocp plug-in)",
+			clear_pcie_correctable_errors)
 	)
 );
 
