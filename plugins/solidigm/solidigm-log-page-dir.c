@@ -17,10 +17,10 @@ struct __attribute__((packed)) supported_log_pages {
 	__u32 supported[256];
 };
 
-const char *lid_to_description(const __u32 lid)
+const char *lid_to_description(const int lid)
 {
 	struct log_description {
-		__u8 lid;
+		int lid;
 		const char *description;
 	};
 

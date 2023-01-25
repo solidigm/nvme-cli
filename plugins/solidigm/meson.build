@@ -5,5 +5,6 @@ sources += [
   'plugins/solidigm/solidigm-latency-tracking.c',
   'plugins/solidigm/solidigm-telemetry.c',
   'plugins/solidigm/solidigm-log-page-dir.c',
+  'plugins/solidigm/solidigm-versions.c',
 ]
 subdir('solidigm-telemetry')

@@ -15,6 +15,7 @@
 #include "solidigm-latency-tracking.h"
 #include "solidigm-telemetry.h"
 #include "solidigm-log-page-dir.h"
+#include "solidigm-versions.h"
 
 #include "plugins/ocp/ocp-smart-extended-log.h"
 #include "plugins/ocp/ocp-clear-fw-update-history.h"
@@ -69,4 +70,10 @@ static int get_log_page_directory_log(int argc, char **argv,
 	struct command *cmd, struct plugin *plugin)
 {
 	return solidigm_get_log_page_directory_log(argc, argv, cmd, plugin);
+}
+
+static int cloud_ssd_plugin_version(int argc, char **argv,
+	struct command *cmd, struct plugin *plugin)
+{
+	return solidigm_cloud_ssd_plugin_version(argc, argv, cmd, plugin);
 }

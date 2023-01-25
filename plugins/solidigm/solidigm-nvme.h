@@ -13,7 +13,7 @@
 
 #include "cmd.h"
 
-#define SOLIDIGM_PLUGIN_VERSION "0.8"
+#define SOLIDIGM_PLUGIN_VERSION "0.9"
 
 PLUGIN(NAME("solidigm", "Solidigm vendor specific extensions", SOLIDIGM_PLUGIN_VERSION),
 	COMMAND_LIST(
@@ -35,6 +35,8 @@ PLUGIN(NAME("solidigm", "Solidigm vendor specific extensions", SOLIDIGM_PLUGIN_V
 			clear_pcie_correctable_errors)
 		ENTRY("log-page-directory", "Retrieve log page directory",
 			get_log_page_directory_log)
+		ENTRY("cloud-SSD-plugin-version", "Display SSD cloud plugin version",
+			cloud_ssd_plugin_version)
 	)
 );
 
