@@ -14,6 +14,7 @@
 #include "solidigm-garbage-collection.h"
 #include "solidigm-latency-tracking.h"
 #include "solidigm-telemetry.h"
+#include "solidigm-log-page-dir.h"
 
 #include "plugins/ocp/ocp-smart-extended-log.h"
 #include "plugins/ocp/ocp-clear-fw-update-history.h"
@@ -62,4 +63,10 @@ static int clear_pcie_correctable_errors(int argc, char **argv, struct command *
 	struct plugin *plugin)
 {
 	return ocp_clear_pcie_correctable_errors(argc, argv, cmd, plugin);
+}
+
+static int get_log_page_directory_log(int argc, char **argv,
+	struct command *cmd, struct plugin *plugin)
+{
+	return solidigm_get_log_page_directory_log(argc, argv, cmd, plugin);
 }

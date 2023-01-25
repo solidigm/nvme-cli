@@ -33,6 +33,8 @@ PLUGIN(NAME("solidigm", "Solidigm vendor specific extensions", SOLIDIGM_PLUGIN_V
 		ENTRY("clear-pcie-correctable-errors",
 			"Clears the PCIe correctable error count (redirects to ocp plug-in)",
 			clear_pcie_correctable_errors)
+		ENTRY("log-page-directory", "Retrieve log page directory",
+			get_log_page_directory_log)
 	)
 );
 
