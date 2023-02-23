@@ -22,34 +22,21 @@
 #include "linux/types.h"
 #include "util/types.h"
 #include "nvme-print.h"
+
+#include "ocp-utils.h"
 #include "ocp-clear-fw-update-history.h"
 
 #define CREATE_CMD
 #include "ocp-nvme.h"
 
-/* C0 SCAO Log Page */
-#define C0_SMART_CLOUD_ATTR_LEN             0x200
-#define C0_SMART_CLOUD_ATTR_OPCODE          0xC0
-#define C0_GUID_LENGTH                      16
-#define C0_ACTIVE_BUCKET_TIMER_INCREMENT    5
-#define C0_ACTIVE_THRESHOLD_INCREMENT       5
-#define C0_MINIMUM_WINDOW_INCREMENT         100
+/* SMART / Health Info Extended Log Page (0xC0) */
+#define SMART_CLOUD_ATTR_OPCODE		0xC0
+#define SMART_CLOUD_ATTR_LEN		512
+#define SMART_CLOUD_GUID_LENGTH		16
+#define SMART_CLOUD_LOG_VERSION_2	2
 
-static __u8 scao_guid[C0_GUID_LENGTH]    = { 0xC5, 0xAF, 0x10, 0x28, 0xEA, 0xBF,
+static __u8 scao_guid[SMART_CLOUD_GUID_LENGTH]  = { 0xC5, 0xAF, 0x10, 0x28, 0xEA, 0xBF,
                 0xF2, 0xA4, 0x9C, 0x4F, 0x6F, 0x7C, 0xC9, 0x14, 0xD5, 0xAF };
-
-/* C3 Latency Monitor Log Page */
-#define C3_LATENCY_MON_LOG_BUF_LEN          0x200
-#define C3_LATENCY_MON_OPCODE               0xC3
-#define C3_LATENCY_MON_VERSION              0x0001
-#define C3_GUID_LENGTH                      16
-static __u8 lat_mon_guid[C3_GUID_LENGTH] = { 0x92, 0x7a, 0xc0, 0x8c, 0xd0, 0x84,
-                0x6c, 0x9c, 0x70, 0x43, 0xe6, 0xd4, 0x58, 0x5e, 0xd4, 0x85 };
-
-#define READ            0
-#define WRITE           1
-#define TRIM            2
-#define RESERVED        3
 
 typedef enum {
         SCAO_PMUW               =  0,	/* Physical media units written */
@@ -61,8 +48,8 @@ typedef enum {
         SCAO_XRC                = 48,	/* XOR recovery count */
         SCAO_UREC               = 56,	/* Uncorrectable read error count */
         SCAO_SEEC               = 64,	/* Soft ecc error count */
-        SCAO_EECE               = 72,	/* End to end corrected errors */
-        SCAO_EEDC               = 76,	/* End to end detected errors */
+        SCAO_EEDE               = 72,	/* End to end detected errors */
+        SCAO_EECE               = 76,	/* End to end corrected errors */
         SCAO_SDPU               = 80,	/* System data percent used */
         SCAO_RFSC               = 81,	/* Refresh counts */
         SCAO_MXUDEC             = 88,	/* Max User data erase counts */
@@ -84,9 +71,26 @@ typedef enum {
         SCAO_PSC                = 160,	/* PLP start count */
         SCAO_EEST               = 176,	/* Endurance estimate */
         SCAO_PLRC               = 192,  /* PCIe Link Retraining Count */
+        SCAO_PSCC               = 200,  /* Power State Change Count */
         SCAO_LPV                = 494,	/* Log page version */
         SCAO_LPG                = 496,	/* Log page GUID */
 } SMART_CLOUD_ATTRIBUTE_OFFSETS;
+
+/* C3 Latency Monitor Log Page */
+#define C3_LATENCY_MON_LOG_BUF_LEN          0x200
+#define C3_LATENCY_MON_OPCODE               0xC3
+#define C3_LATENCY_MON_VERSION              0x0001
+#define C3_GUID_LENGTH                      16
+#define C0_ACTIVE_BUCKET_TIMER_INCREMENT    5
+#define C0_ACTIVE_THRESHOLD_INCREMENT       5
+#define C0_MINIMUM_WINDOW_INCREMENT         100
+static __u8 lat_mon_guid[C3_GUID_LENGTH] = { 0x92, 0x7a, 0xc0, 0x8c, 0xd0, 0x84,
+                0x6c, 0x9c, 0x70, 0x43, 0xe6, 0xd4, 0x58, 0x5e, 0xd4, 0x85 };
+
+#define READ            0
+#define WRITE           1
+#define TRIM            2
+#define RESERVED        3
 
 struct __attribute__((__packed__)) ssd_latency_monitor_log {
         __u8    feature_status;                         /* 0x00  */
@@ -142,282 +146,289 @@ static int convert_ts(time_t time, char *ts_buf)
         return 0;
 }
 
-static void ocp_print_C0_log_normal(void *data)
+static void print_smart_cloud_log(__u8 *log_data)
 {
-        __u8 *log_data = (__u8*)data;
-        uint16_t smart_log_ver = 0;
+	printf("SMART Cloud Health Log Page Data:\n");
 
-        printf("SMART Cloud Attributes :- \n");
+	printf("  %-40s%s\n", "Physical Media Units Written:",
+		uint128_t_to_string(le128_to_cpu(&log_data[SCAO_PMUW])));
+	printf("  %-40s%s\n", "Physical Media Units Read:",
+		uint128_t_to_string(le128_to_cpu(&log_data[SCAO_PMUR])));
+	printf("  %-40s%"PRIu64"\n", "Bad User NAND Blocks - Raw:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_BUNBR] & 0x0000FFFFFFFFFFFF));
+	printf("  %-40s%d\n", "Bad User NAND Blocks - Normalized:",
+		le16_to_cpu(*(uint16_t *)&log_data[SCAO_BUNBN]));
+	printf("  %-40s%"PRIu64"\n", "Bad System NAND Blocks - Raw:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_BSNBR] & 0x0000FFFFFFFFFFFF));
+	printf("  %-40s%d\n", "Bad System NAND Blocks - Normalized:",
+		le16_to_cpu(*(uint16_t *)&log_data[SCAO_BSNBN]));
+	printf("  %-40s%"PRIu64"\n", "XOR Recovery Count:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_XRC]));
+	printf("  %-40s%"PRIu64"\n", "Uncorrectable Read Error Count:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_UREC]));
+	printf("  %-40s%"PRIu64"\n", "Soft ECC Error Count:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_SEEC]));
+	printf("  %-40s%"PRIu32"\n", "End to End Detected Errors:",
+		le32_to_cpu(*(uint32_t *)&log_data[SCAO_EEDE]));
+	printf("  %-40s%"PRIu32"\n", "End to End Corrected Errors:",
+		le32_to_cpu(*(uint32_t *)&log_data[SCAO_EECE]));
+	printf("  %-40s%d\n", "System Data Percent Used:", log_data[SCAO_SDPU]);
+	printf("  %-40s%"PRIu64"\n", "Refresh Counts:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_RFSC] & 0x00FFFFFFFFFFFFFF));
+	printf("  %-40s%"PRIu32"\n", "Max User Data Erase Counts:",
+		le32_to_cpu(*(uint32_t *)&log_data[SCAO_MXUDEC]));
+	printf("  %-40s%"PRIu32"\n", "Min User Data Erase Counts:",
+		le32_to_cpu(*(uint32_t *)&log_data[SCAO_MNUDEC]));
+	printf("  %-40s%d\n", "Number of Thermal Throttling Events:", log_data[SCAO_NTTE]);
+	printf("  %-40s%d\n", "Current Throttling Status:", log_data[SCAO_CTS]);
+	printf("  %-40s%"PRIu64"\n", "PCIe Correctable Error Count:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_PCEC]));
+	printf("  %-40s%"PRIu32"\n", "Incomplete Shutdowns:",
+		le32_to_cpu(*(uint32_t *)&log_data[SCAO_ICS]));
+	printf("  %-40s%d\n", "Percent Free Blocks:", log_data[SCAO_PFB]);
+	printf("  %-40s%"PRIu16"\n", "Capacitor Health:",
+		le16_to_cpu(*(uint16_t *)&log_data[SCAO_CPH]));
+	printf("  %-40s%"PRIu64"\n", "Unaligned I/O:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_UIO]));
+	printf("  %-40s%"PRIu64"\n", "Security Version Number:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_SVN]));
+	printf("  %-40s%"PRIu64"\n", "Namespace Utilization:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_NUSE]));
+	printf("  %-40s%s\n", "PLP Start Count:",
+		uint128_t_to_string(le128_to_cpu(&log_data[SCAO_PSC])));
+	printf("  %-40s%s\n", "Endurance Estimate:",
+		uint128_t_to_string(le128_to_cpu(&log_data[SCAO_EEST])));
 
-        printf("  Physical media units written -   	        %"PRIu64" %"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUW+8] & 0xFFFFFFFFFFFFFFFF),
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUW] & 0xFFFFFFFFFFFFFFFF));
-        printf("  Physical media units read    - 	        %"PRIu64" %"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUR+8] & 0xFFFFFFFFFFFFFFFF),
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUR] & 0xFFFFFFFFFFFFFFFF));
-        printf("  Bad user nand blocks - Raw			%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_BUNBR] & 0x0000FFFFFFFFFFFF));
-        printf("  Bad user nand blocks - Normalized		%d\n",
-                        (uint16_t)le16_to_cpu(*(uint16_t *)&log_data[SCAO_BUNBN]));
-        printf("  Bad system nand blocks - Raw			%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_BSNBR] & 0x0000FFFFFFFFFFFF));
-        printf("  Bad system nand blocks - Normalized		%d\n",
-                        (uint16_t)le16_to_cpu(*(uint16_t *)&log_data[SCAO_BSNBN]));
-        printf("  XOR recovery count				%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_XRC]));
-        printf("  Uncorrectable read error count		%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_UREC]));
-        printf("  Soft ecc error count				%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_SEEC]));
-        printf("  End to end corrected errors			%"PRIu32"\n",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_EECE]));
-        printf("  End to end detected errors			%"PRIu32"\n",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_EEDC]));
-        printf("  System data percent used			%d\n",
-                        (__u8)log_data[SCAO_SDPU]);
-        printf("  Refresh counts				%"PRIu64"\n",
-                        (uint64_t)(le64_to_cpu(*(uint64_t *)&log_data[SCAO_RFSC])& 0x00FFFFFFFFFFFFFF));
-        printf("  Max User data erase counts			%"PRIu32"\n",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_MXUDEC]));
-        printf("  Min User data erase counts			%"PRIu32"\n",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_MNUDEC]));
-        printf("  Number of Thermal throttling events		%d\n",
-                        (__u8)log_data[SCAO_NTTE]);
-        printf("  Current throttling status		  	0x%x\n",
-                        (__u8)log_data[SCAO_CTS]);
-        printf("  PCIe correctable error count			%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PCEC]));
-        printf("  Incomplete shutdowns				%"PRIu32"\n",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_ICS]));
-        printf("  Percent free blocks				%d\n",
-                        (__u8)log_data[SCAO_PFB]);
-        printf("  Capacitor health				%"PRIu16"\n",
-                        (uint16_t)le16_to_cpu(*(uint16_t *)&log_data[SCAO_CPH]));
-        printf("  Unaligned I/O					%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_UIO]));
-        printf("  Security Version Number			%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_SVN]));
-        printf("  NUSE - Namespace utilization			%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_NUSE]));
-        printf("  PLP start count				%s\n",
-                uint128_t_to_string(le128_to_cpu(&log_data[SCAO_PSC])));
-        printf("  Endurance estimate				%s\n",
-                uint128_t_to_string(le128_to_cpu(&log_data[SCAO_EEST])));
-        smart_log_ver = (uint16_t)le16_to_cpu(*(uint16_t *)&log_data[SCAO_LPV]);
-        printf("  Log page version				%"PRIu16"\n",smart_log_ver);
-        printf("  Log page GUID					0x");
-        printf("%"PRIx64"%"PRIx64"\n",(uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_LPG + 8]),
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_LPG]));
-        if(smart_log_ver > 2) {
-                printf("  Errata Version Field                          %d\n",
-                                (__u8)log_data[SCAO_EVF]);
-                printf("  Point Version Field                           %"PRIu16"\n",
-                                (uint16_t)log_data[SCAO_PVF]);
-                printf("  Minor Version Field                           %"PRIu16"\n",
-                                (uint16_t)log_data[SCAO_MIVF]);
-                printf("  Major Version Field                           %d\n",
-                                (__u8)log_data[SCAO_MAVF]);
-                printf("  NVMe Errata Version				%d\n",
-                                (__u8)log_data[SCAO_NEV]);
-                printf("  PCIe Link Retraining Count			%"PRIu64"\n",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PLRC]));
-        }
-        printf("\n");
+	uint16_t smart_log_ver = le16_to_cpu(*(uint16_t *)&log_data[SCAO_LPV]);
+
+	printf("  %-40s%"PRIu16"\n", "Log Page Version:", smart_log_ver);
+	printf("  %-40s0x%"PRIx64"%"PRIx64"\n", "Log Page GUID:",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_LPG + 8]),
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_LPG]));
+
+	if (smart_log_ver > SMART_CLOUD_LOG_VERSION_2) {
+		printf("  %-40s%d\n", "Errata Version:", log_data[SCAO_EVF]);
+		printf("  %-40s%"PRIu16"\n", "Point Version:",
+			le16_to_cpu(*(uint16_t *)&log_data[SCAO_PVF]));
+		printf("  %-40s%"PRIu16"\n", "Minor Version:",
+			le16_to_cpu(*(uint16_t *)&log_data[SCAO_MIVF]));
+		printf("  %-40s%d\n", "Major Version:", log_data[SCAO_MAVF]);
+		printf("  %-40s%d\n", "NVMe Errata Version:", log_data[SCAO_NEV]);
+		printf("  %-40s%"PRIu64"\n", "PCIe Link Retraining Count:",
+			le64_to_cpu(*(uint64_t *)&log_data[SCAO_PLRC]));
+		printf("  %-40s%"PRIu64"\n", "Power State Change Count:",
+			le64_to_cpu(*(uint64_t *)&log_data[SCAO_PSCC]));
+	}
 }
 
-static void ocp_print_C0_log_json(void *data)
+static void print_smart_cloud_log_json(__u8 *log_data)
 {
-        __u8 *log_data = (__u8*)data;
-        struct json_object *root;
-        struct json_object *pmuw;
-        struct json_object *pmur;
-        uint16_t smart_log_ver = 0;
+	struct json_object *root = json_create_object();
+	struct json_object *pmuw = json_create_object();
+	struct json_object *pmur = json_create_object();
+	struct json_object *bunb = json_create_object();
+	struct json_object *bsnb = json_create_object();
+	struct json_object *psc  = json_create_object();
+	struct json_object *eest = json_create_object();
 
-        root = json_create_object();
-        pmuw = json_create_object();
-        pmur = json_create_object();
+	json_object_add_value_uint64(pmuw, "hi",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUW + 8]));
+	json_object_add_value_uint64(pmuw, "lo",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUW]));
+	json_object_add_value_object(root, "physical media units written", pmuw);
 
-        json_object_add_value_uint64(pmuw, "hi",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUW+8] & 0xFFFFFFFFFFFFFFFF));
-        json_object_add_value_uint64(pmuw, "lo",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUW] & 0xFFFFFFFFFFFFFFFF));
-        json_object_add_value_object(root, "Physical media units written", pmuw);
-        json_object_add_value_uint64(pmur, "hi",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUR+8] & 0xFFFFFFFFFFFFFFFF));
-        json_object_add_value_uint64(pmur, "lo",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUR] & 0xFFFFFFFFFFFFFFFF));
-        json_object_add_value_object(root, "Physical media units read", pmur);
-        json_object_add_value_uint64(root, "Bad user nand blocks - Raw",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_BUNBR] & 0x0000FFFFFFFFFFFF));
-        json_object_add_value_uint(root, "Bad user nand blocks - Normalized",
-                        (uint16_t)le16_to_cpu(*(uint16_t *)&log_data[SCAO_BUNBN]));
-        json_object_add_value_uint64(root, "Bad system nand blocks - Raw",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_BSNBR] & 0x0000FFFFFFFFFFFF));
-        json_object_add_value_uint(root, "Bad system nand blocks - Normalized",
-                        (uint16_t)le16_to_cpu(*(uint16_t *)&log_data[SCAO_BSNBN]));
-        json_object_add_value_uint64(root, "XOR recovery count",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_XRC]));
-        json_object_add_value_uint64(root, "Uncorrectable read error count",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_UREC]));
-        json_object_add_value_uint64(root, "Soft ecc error count",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_SEEC]));
-        json_object_add_value_uint(root, "End to end corrected errors",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_EECE]));
-        json_object_add_value_uint(root, "End to end detected errors",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_EEDC]));
-        json_object_add_value_uint(root, "System data percent used",
-                        (__u8)log_data[SCAO_SDPU]);
-        json_object_add_value_uint64(root, "Refresh counts",
-                        (uint64_t)(le64_to_cpu(*(uint64_t *)&log_data[SCAO_RFSC])& 0x00FFFFFFFFFFFFFF));
-        json_object_add_value_uint(root, "Max User data erase counts",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_MXUDEC]));
-        json_object_add_value_uint(root, "Min User data erase counts",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_MNUDEC]));
-        json_object_add_value_uint(root, "Number of Thermal throttling events",
-                        (__u8)log_data[SCAO_NTTE]);
-        json_object_add_value_uint(root, "Current throttling status",
-                        (__u8)log_data[SCAO_CTS]);
-        json_object_add_value_uint64(root, "PCIe correctable error count",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PCEC]));
-        json_object_add_value_uint(root, "Incomplete shutdowns",
-                        (uint32_t)le32_to_cpu(*(uint32_t *)&log_data[SCAO_ICS]));
-        json_object_add_value_uint(root, "Percent free blocks",
-                        (__u8)log_data[SCAO_PFB]);
-        json_object_add_value_uint(root, "Capacitor health",
-                        (uint16_t)le16_to_cpu(*(uint16_t *)&log_data[SCAO_CPH]));
-        json_object_add_value_uint64(root, "Unaligned I/O",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_UIO]));
-        json_object_add_value_uint64(root, "Security Version Number",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_SVN]));
-        json_object_add_value_uint64(root, "NUSE - Namespace utilization",
-                        (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_NUSE]));
-        json_object_add_value_uint128(root, "PLP start count",
-                        le128_to_cpu(&log_data[SCAO_PSC]));
-        json_object_add_value_uint128(root, "Endurance estimate",
-                        le128_to_cpu(&log_data[SCAO_EEST]));
-        smart_log_ver = (uint16_t)le16_to_cpu(*(uint16_t *)&log_data[SCAO_LPV]);
-        json_object_add_value_uint(root, "Log page version", smart_log_ver);
-        char guid[40];
-        memset((void*)guid, 0, 40);
-        sprintf((char*)guid, "0x%"PRIx64"%"PRIx64"",(uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_LPG + 8]),
-                (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_LPG]));
-        json_object_add_value_string(root, "Log page GUID", guid);
-        if(smart_log_ver > 2){
-                json_object_add_value_uint(root, "Errata Version Field",
-                                (__u8)log_data[SCAO_EVF]);
-                json_object_add_value_uint(root, "Point Version Field",
-                                (uint16_t)log_data[SCAO_PVF]);
-                json_object_add_value_uint(root, "Minor Version Field",
-                                (uint16_t)log_data[SCAO_MIVF]);
-                json_object_add_value_uint(root, "Major Version Field",
-                                (__u8)log_data[SCAO_MAVF]);
-                json_object_add_value_uint(root, "NVMe Errata Version",
-                                (__u8)log_data[SCAO_NEV]);
-                json_object_add_value_uint(root, "PCIe Link Retraining Count",
-                                (uint64_t)le64_to_cpu(*(uint64_t *)&log_data[SCAO_PLRC]));
-        }
-        json_print_object(root, NULL);
-        printf("\n");
-        json_free_object(root);
+	json_object_add_value_uint64(pmur, "hi",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUR + 8]));
+	json_object_add_value_uint64(pmur, "lo",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_PMUR]));
+	json_object_add_value_object(root, "physical media units read", pmur);
+
+	json_object_add_value_uint64(bunb, "raw",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_BUNBR] & 0x0000FFFFFFFFFFFF));
+	json_object_add_value_uint(bunb, "normalized",
+				   le16_to_cpu(*(uint16_t *)&log_data[SCAO_BUNBN]));
+	json_object_add_value_object(root, "bad user nand blocks", bunb);
+
+	json_object_add_value_uint64(bsnb, "raw",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_BSNBR] & 0x0000FFFFFFFFFFFF));
+	json_object_add_value_uint(bsnb, "normalized",
+				   le16_to_cpu(*(uint16_t *)&log_data[SCAO_BSNBN]));
+	json_object_add_value_object(root, "bad system nand blocks", bsnb);
+
+	json_object_add_value_uint64(root, "xor recovery count",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_XRC]));
+	json_object_add_value_uint64(root, "uncorrectable read error count",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_UREC]));
+	json_object_add_value_uint64(root, "soft ecc error count",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_SEEC]));
+	json_object_add_value_uint(root, "end to end detected errors",
+				   le32_to_cpu(*(uint32_t *)&log_data[SCAO_EEDE]));
+	json_object_add_value_uint(root, "end to end corrected errors",
+				   le32_to_cpu(*(uint32_t *)&log_data[SCAO_EECE]));
+	json_object_add_value_uint(root, "system data percent used", log_data[SCAO_SDPU]);
+	json_object_add_value_uint64(root, "refresh counts",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_RFSC] & 0x00FFFFFFFFFFFFFF));
+	json_object_add_value_uint(root, "max user data erase counts",
+				   le32_to_cpu(*(uint32_t *)&log_data[SCAO_MXUDEC]));
+	json_object_add_value_uint(root, "min user data erase counts",
+				   le32_to_cpu(*(uint32_t *)&log_data[SCAO_MNUDEC]));
+	json_object_add_value_uint(root, "number of thermal throttling events",
+				   log_data[SCAO_NTTE]);
+	json_object_add_value_uint(root, "current throttling status",
+				   log_data[SCAO_CTS]);
+	json_object_add_value_uint64(root, "pcie correctable error count",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_PCEC]));
+	json_object_add_value_uint(root, "incomplete shutdowns",
+				   le32_to_cpu(*(uint32_t *)&log_data[SCAO_ICS]));
+	json_object_add_value_uint(root, "percent free blocks", log_data[SCAO_PFB]);
+	json_object_add_value_uint(root, "capacitor health",
+				   le16_to_cpu(*(uint16_t *)&log_data[SCAO_CPH]));
+	json_object_add_value_uint64(root, "unaligned i/o",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_UIO]));
+	json_object_add_value_uint64(root, "security version number",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_SVN]));
+	json_object_add_value_uint64(root, "namespace utilization",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_NUSE]));
+
+	json_object_add_value_uint64(psc, "hi",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_PSC + 8]));
+	json_object_add_value_uint64(psc, "lo",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_PSC]));
+	json_object_add_value_object(root, "plp start count", psc);
+
+	json_object_add_value_uint64(eest, "hi",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_EEST + 8]));
+	json_object_add_value_uint64(eest, "lo",
+				     le64_to_cpu(*(uint64_t *)&log_data[SCAO_EEST]));
+	json_object_add_value_object(root, "endurance estimate", eest);
+
+	__u16 smart_log_ver = le16_to_cpu(*(uint16_t *)&log_data[SCAO_LPV]);
+
+	json_object_add_value_uint(root, "log page version", smart_log_ver);
+
+	char guid[40] = { 0 };
+
+	sprintf(guid, "0x%"PRIx64"%"PRIx64"",
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_LPG + 8]),
+		le64_to_cpu(*(uint64_t *)&log_data[SCAO_LPG]));
+	json_object_add_value_string(root, "log page guid", guid);
+
+	if (smart_log_ver > SMART_CLOUD_LOG_VERSION_2) {
+		json_object_add_value_uint(root, "errata version field", log_data[SCAO_EVF]);
+		json_object_add_value_uint(root, "point version",
+					   le16_to_cpu(*(uint16_t *)&log_data[SCAO_PVF]));
+		json_object_add_value_uint(root, "minor version",
+					   le16_to_cpu(*(uint16_t *)&log_data[SCAO_MIVF]));
+		json_object_add_value_uint(root, "major version", log_data[SCAO_MAVF]);
+		json_object_add_value_uint(root, "nvme errata version", log_data[SCAO_NEV]);
+		json_object_add_value_uint(root, "pcie link retraining count",
+					   le64_to_cpu(*(uint64_t *)&log_data[SCAO_PLRC]));
+		json_object_add_value_uint(root, "power state change count",
+					   le64_to_cpu(*(uint64_t *)&log_data[SCAO_PSCC]));
+	}
+
+	json_print_object(root, NULL);
+	json_free_object(root);
+
+	printf("\n");
 }
 
-static int get_c0_log_page(int fd, char *format)
+static int get_smart_cloud_log_page(struct nvme_dev *dev, char *format)
 {
-        int ret = 0;
-        int fmt = -1;
-        __u8 *data;
-        int i;
+	__u8 data[SMART_CLOUD_ATTR_LEN] = { 0 };
+	int uuid_index = 0;
 
-        fmt = validate_output_format(format);
-        if (fmt < 0) {
-                fprintf(stderr, "ERROR : OCP : invalid output format\n");
-                return fmt;
-        }
+	// Best effort attempt at uuid. Otherwise, assume no index (i.e. 0)
+	// Log GUID check will ensure correctness of returned data
+	ocp_get_uuid_index(dev, &uuid_index);
 
-        if ((data = (__u8 *) malloc(sizeof(__u8) * C0_SMART_CLOUD_ATTR_LEN)) == NULL) {
-                fprintf(stderr, "ERROR : OCP : malloc : %s\n", strerror(errno));
-                return -1;
-        }
-        memset(data, 0, sizeof (__u8) * C0_SMART_CLOUD_ATTR_LEN);
+	struct nvme_get_log_args args = {
+		.lpo = 0,
+		.result = NULL,
+		.log = &data,
+		.args_size = sizeof(args),
+		.fd = dev_fd(dev),
+		.timeout = NVME_DEFAULT_IOCTL_TIMEOUT,
+		.lid =  SMART_CLOUD_ATTR_OPCODE,
+		.len = sizeof(data),
+		.nsid = NVME_NSID_ALL,
+		.csi = NVME_CSI_NVM,
+		.lsi = NVME_LOG_LSI_NONE,
+		.lsp = 0,
+		.uuidx = uuid_index,
+		.rae = false,
+		.ot = false,
+	};
 
-        ret = nvme_get_log_simple(fd, C0_SMART_CLOUD_ATTR_OPCODE,
-                        C0_SMART_CLOUD_ATTR_LEN, data);
+	int ret = nvme_get_log(&args);
 
-        if (strcmp(format, "json"))
-                fprintf(stderr, "NVMe Status:%s(%x)\n",
-                        nvme_status_to_string(ret, false), ret);
+	if (ret)
+		fprintf(stderr, "NVMe status: %s (0x%x)\n",
+			nvme_status_to_string(ret, false), ret);
 
-        if (ret == 0) {
+	if (!ret && !memcmp(scao_guid, &data[SCAO_LPG],
+		sizeof(scao_guid)) == 0) {
 
-                /* check log page guid */
-                /* Verify GUID matches */
-                for (i=0; i<16; i++) {
-                        if (scao_guid[i] != data[SCAO_LPG + i])	{
-                                fprintf(stderr, "ERROR : OCP : Unknown GUID in C0 Log Page data\n");
-                                int j;
-                                fprintf(stderr, "ERROR : OCP : Expected GUID:  0x");
-                                for (j = 0; j<16; j++) {
-                                        fprintf(stderr, "%x", scao_guid[j]);
-                                }
-                                fprintf(stderr, "\nERROR : OCP : Actual GUID:    0x");
-                                for (j = 0; j<16; j++) {
-                                        fprintf(stderr, "%x", data[SCAO_LPG + j]);
-                                }
-                                fprintf(stderr, "\n");
+		fprintf(stderr, "ERROR: Unknown GUID in log page data\n");
 
-                                ret = -1;
-                                goto out;
-                        }
-                }
+		fprintf(stderr, "ERROR: Expected GUID: 0x%"PRIx64"%"PRIx64"\n",
+			le64_to_cpu(*(uint64_t *)&scao_guid[8]),
+			le64_to_cpu(*(uint64_t *)&scao_guid[0]));
 
-                /* print the data */
-                switch (fmt) {
-                case NORMAL:
-                        ocp_print_C0_log_normal(data);
-                        break;
-                case JSON:
-                        ocp_print_C0_log_json(data);
-                        break;
-                }
-        } else {
-                fprintf(stderr, "ERROR : OCP : Unable to read C0 data from buffer\n");
-        }
+		fprintf(stderr, "ERROR: Actual GUID: 0x%"PRIx64"%"PRIx64"\n",
+			le64_to_cpu(*(uint64_t *)&data[SCAO_LPG + 8]),
+			le64_to_cpu(*(uint64_t *)&data[SCAO_LPG]));
 
-out:
-        free(data);
-        return ret;
+		ret = -1;
+	}
+
+	if (!ret) {
+		const enum nvme_print_flags print_flag = validate_output_format(format);
+
+		if (print_flag == JSON)
+			print_smart_cloud_log_json(data);
+		else if (print_flag == NORMAL)
+			print_smart_cloud_log(data);
+		else {
+			fprintf(stderr, "ERROR: Failed to parse. Unknown output option: %s\n", format);
+			ret = -EINVAL;
+		}
+	}
+
+	return ret;
 }
 
-static int ocp_smart_add_log(int argc, char **argv, struct command *cmd,
-                struct plugin *plugin)
+static int ocp_smart_cloud_log(int argc, char **argv, struct command *cmd,
+			     struct plugin *plugin)
 {
-        const char *desc = "Retrieve latency monitor log data.";
-	struct nvme_dev *dev;
-        int ret = 0;
+	const char *desc = "Retrieve the extended SMART health data.";
+	struct nvme_dev *dev = NULL;
+	int ret = 0;
 
-        struct config {
-                char *output_format;
-        };
+	struct config {
+		char *output_format;
+	};
 
-        struct config cfg = {
-                .output_format = "normal",
-        };
+	struct config cfg = {
+		.output_format = "normal",
+	};
 
-        OPT_ARGS(opts) = {
-                OPT_FMT("output-format", 'o', &cfg.output_format, "output Format: normal|json"),
-                OPT_END()
-        };
+	OPT_ARGS(opts) = {
+		OPT_FMT("output-format", 'o', &cfg.output_format, "output format: normal|json"),
+		OPT_END()
+	};
 
-        ret = parse_and_open(&dev, argc, argv, desc, opts);
-        if (ret)
-                return ret;
+	ret = parse_and_open(&dev, argc, argv, desc, opts);
+	if (ret)
+		return ret;
 
-        ret = get_c0_log_page(dev_fd(dev), cfg.output_format);
-        if (ret)
-                fprintf(stderr, "ERROR : OCP : Failure reading the C0 Log Page, ret = %d\n",
-                        ret);
-        dev_close(dev);
-        return ret;
+	ret = get_smart_cloud_log_page(dev, cfg.output_format);
+	if (ret)
+		fprintf(stderr, "ERROR: Failure reading the extended SMART health log page, ret = %d\n",
+			ret);
+
+	dev_close(dev);
+	return ret;
 }
 
 static int ocp_print_C3_log_normal(struct nvme_dev *dev,
